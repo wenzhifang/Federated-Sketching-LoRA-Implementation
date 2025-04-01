@@ -1,5 +1,5 @@
-from datasets import load_dataset
-from torch.utils.data import DataLoader
+from datasets import Dataset, load_dataset
+from torch.utils.data import DataLoader, Subset
 import torch.nn.functional as F
 import numpy as np
 import re
@@ -12,6 +12,9 @@ base_model = args.base_model
 
 # Load model directly
 from transformers import AutoTokenizer, AutoModelForCausalLM
+
+from huggingface_hub import login
+login()
 
 tokenizer = AutoTokenizer.from_pretrained(base_model, token = True)
 tokenizer.pad_token_id = 0
@@ -50,6 +53,7 @@ def generate_and_tokenize_prompt(data_point, train_on_inputs=True):
     return tokenized_full_prompt
 
 def generate_prompt(data_point):
+    # sorry about the formatting disaster gotta move fast
     if data_point["input"]:
         return f"""Below is an instruction that describes a task, paired with an input that provides further context. Write a response that appropriately completes the request. 
 
@@ -123,39 +127,6 @@ def collate_fn_left(batch):
         "labels": labels_padded
     }
 
-def build_datasets(args, base_seed):
-    file_path = f'./dataset/{args.dataset}/train.json'
-    if not os.path.exists(file_path):
-        raise FileNotFoundError(f"can not find dataset file : {file_path}")
-    dataset = load_dataset("json", data_files=file_path)["train"]
-    trainset = dataset.map(generate_and_tokenize_prompt)
-
-    # Convert dataset to a list for shuffling
-    trainset_list = list(trainset)
-    random.seed(base_seed)
-    # Perform deterministic shuffling (seed already set in main.py)
-    random.shuffle(trainset_list)  # Use Python's random.shuffle
-
-    # Convert the shuffled list back to a dataset
-    shuffled_trainset = trainset.select(range(len(trainset_list)))
-
-    # Shard the dataset into client-specific subsets
-    clients = [
-        DataLoader(
-            shuffled_trainset.shard(num_shards=args.clients, index=i),
-            batch_size=args.client_batch,
-            shuffle=False,  # No need to shuffle again here
-            num_workers=4,
-            collate_fn=collate_fn_left,
-            pin_memory=True,
-        )
-        for i in range(args.clients)
-    ]
-    return clients
-
-
-## below for evaluation
-
 def extract_answer(args, sentence: str) -> float:
     dataset = args.dataset
     if dataset == 'boolq':
@@ -198,49 +169,126 @@ def generate_prompt_eval(instruction):
             {instruction}
 
             ### Response:
-
-# def generate_tokenizers_eval(instructions):
-#     prompts = [generate_prompt_eval(instruction) for instruction in instructions]
-#     return tokenizer(prompts, return_tensors="pt", padding=True)
+            """  # noqa: E501
+            
 def generate_tokenizers_eval(instructions):
     prompts = [generate_prompt_eval(instruction) for instruction in instructions]
     results = tokenizer(prompts, return_tensors="pt", padding=True)
     return results
-    ''' 
-    results = tokenizer(prompts, return_tensors="pt", padding=True)
-    input_ids = results["input_ids"]
-    attention_mask = results["attention_mask"]
-
-    # Check and append eos_token_id to each input sequence if it's not already there
-    eos_token_id = tokenizer.eos_token_id
-    # Create lists to hold updated input_ids and attention_mask
-    new_input_ids = []
-    new_attention_mask = []
-
-    for i in range(input_ids.shape[0]):
-        # Append eos_token_id if not present
-        if input_ids[i, -1] != eos_token_id:
-            padded_input = F.pad(input_ids[i], (0, 1), value=eos_token_id)
-            padded_mask = F.pad(attention_mask[i], (0, 1), value=1)
-        else:
-            padded_input = input_ids[i]
-            padded_mask = attention_mask[i]
-
-        new_input_ids.append(padded_input)
-        new_attention_mask.append(padded_mask)
-
-    # Stack back into tensors
-    results["input_ids"] = torch.stack(new_input_ids, dim=0)
-    results["attention_mask"] = torch.stack(new_attention_mask, dim=0)
-
-    return results
-    '''
 
 def build_datasets_eval(args):
     batch_size = args.test_batch
     file_path = f'./dataset/{args.dataset}/test.json'
+    
     if not os.path.exists(file_path):
         raise FileNotFoundError(f"can not find dataset file : {file_path}")
+    
     dataset = load_dataset("json", data_files=file_path)
-    valloader = DataLoader(dataset["train"], batch_size = batch_size, num_workers=0, pin_memory=True, shuffle=False)
+    data = dataset["train"]
+    
+    # Ensure dataset size is no larger than 3000
+    max_samples = 3000
+    if len(data) > max_samples:
+        data = Subset(data, range(max_samples))
+    
+    valloader = DataLoader(data, batch_size=batch_size, num_workers=4, pin_memory=True, shuffle=False)
     return valloader
+
+
+
+def build_datasets(args, alpha=0.5):
+    num_clients = args.clients
+    dataset_list = ["ARC-Challenge", "ARC-Easy", "boolq", "hellaswag", "openbookqa", "piqa", "social_i_qa", "winogrande"]
+    base_seed = 42
+    np.random.seed(base_seed)    
+    datasets = {}
+    for dataset in dataset_list:
+        file_path = f'./dataset/{dataset}/train.json'
+        raw_dataset = load_dataset("json", data_files=file_path)["train"]
+        raw_dataset = list(raw_dataset)
+
+        shuffled_indices = np.random.permutation(len(raw_dataset))
+        datasets[dataset] = [raw_dataset[i] for i in shuffled_indices]
+
+    
+    # Calculate target size per client (average across all data)
+    max_size = sum([len(dataset) for key, dataset in datasets.items()])//num_clients   
+    #print(f"dataset size: {[len(dataset) for key, dataset in datasets.items()]}")
+    
+    largest_dataset_name = max(datasets.keys(), key=lambda x: len(datasets[x]))
+    largest_dataset = datasets.pop(largest_dataset_name)
+    
+    clients = {i: [] for i in range(num_clients)}
+    client_task_counts = {i: {dataset: 0 for dataset in datasets.keys()} for i in range(num_clients)}
+    client_task_counts = {i: dict(client_task_counts[i], **{largest_dataset_name: 0}) for i in range(num_clients)}
+    
+    task_totals = {dataset: 0 for dataset in datasets.keys()}
+    task_totals[largest_dataset_name] = 0
+    
+    for dataset_name, dataset in datasets.items():
+        props = np.random.dirichlet(np.repeat(alpha, num_clients))
+        ds_size = len(dataset)
+        client_sample_sizes = [int(prop * ds_size) for prop in props]
+        client_sample_sizes[-1] = ds_size - sum(client_sample_sizes[:-1])
+        
+        idx = 0
+        for client_id, sample_size in enumerate(client_sample_sizes):
+            if sample_size > 0:
+                clients[client_id].extend(dataset[idx:idx+sample_size])
+                client_task_counts[client_id][dataset_name] = sample_size
+                task_totals[dataset_name] += sample_size
+                idx += sample_size
+
+    #print("Initial data distribution:", [len(clients[x]) for x in range(num_clients)])
+    
+    # Sort clients by size to fill smallest ones first
+    sort_id = sorted(range(num_clients), key=lambda x: len(clients[x]))
+    
+    # Fill clients with largest dataset to reach target size
+    largest_idx = 0
+    for client_id in sort_id:
+        size_diff = max_size - len(clients[client_id])
+        if size_diff > 0 and largest_idx < len(largest_dataset):
+            # Don't allocate more than what's available in largest dataset
+            size_diff = min(size_diff, len(largest_dataset) - largest_idx)
+            clients[client_id].extend(largest_dataset[largest_idx:largest_idx+size_diff])
+            client_task_counts[client_id][largest_dataset_name] = size_diff
+            task_totals[largest_dataset_name] += size_diff
+            largest_idx += size_diff
+    '''
+    print("Final data distribution:", [len(clients[x]) for x in range(num_clients)])
+    
+    # Print distribution table
+    sorted_datasets = sorted(list(datasets.keys()) + [largest_dataset_name])
+    header = "Client | " + " | ".join(sorted_datasets) + " | Total"
+    separator = "-" * len(header)
+    print(separator)
+    print(header)
+    print(separator)
+    
+    client_totals = []
+    for client_id in range(num_clients):
+        client_total = sum(client_task_counts[client_id].values())
+        client_totals.append(client_total)
+        row_values = [str(client_task_counts[client_id][ds]) for ds in sorted_datasets]
+        print(f"{client_id:6d} | {' | '.join(row_values):s} | {client_total}")
+    
+    print(separator)
+    task_total_values = [str(task_totals[ds]) for ds in sorted_datasets]
+    print(f"Total  | {' | '.join(task_total_values)} | {sum(client_totals)}")
+    print(separator)
+    '''
+    
+    # Convert to Dataset objects and apply tokenization
+    client_datasets = {i: Dataset.from_list(data) for i, data in clients.items()}
+    client_datasets = [dataset.map(generate_and_tokenize_prompt) for i, dataset in client_datasets.items()]
+
+    clients=[DataLoader(client_datasets[i],
+            batch_size=args.client_batch,
+            num_workers=4,
+            collate_fn=collate_fn_left,
+            pin_memory=True)
+        for i in range(num_clients)
+    ]
+
+    return clients
