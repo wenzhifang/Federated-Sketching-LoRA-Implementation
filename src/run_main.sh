@@ -1,14 +1,10 @@
 #!/bin/bash
+
 export TOKENIZERS_PARALLELISM=true
-r=64
-ratio=0.125
-algorithm="slora_r64_ratio_0125"
+rank_type="normal"
 
-accelerate launch --multi_gpu main.py --client-batch 4 --lora_r $r --sketching_ratio $ratio --num_epochs 15 --local_iter_per_round 20 --dataset 'commensense' --algorithm $algorithm
+accelerate launch --num_processes 4 main.py --client-batch 4 --lora_r 64 --clients 10 --num_epochs 15 --num_comm_rounds 30 --local_iter_per_round 20 --rank_type $rank_type
 
-datasets=("boolq" "winogrande" "openbookqa" "ARC-Easy" "ARC-Challenge" "social_i_qa" "piqa" "hellaswag")
+export CUDA_VISIBLE_DEVICES=0
 
-for dataset in "${datasets[@]}"; do
-    echo "Running evaluation for dataset: $dataset"
-    accelerate launch --multi_gpu evaluation_par.py --algorithm $algorithm --dataset "$dataset"
-done
+python evaluation_vllm.py
