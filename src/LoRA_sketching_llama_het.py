@@ -121,7 +121,7 @@ def fl_slora_train_llama_het(server_model, client_dataloaders, server_opt, serve
             # Server model update
             server_params = {normalize_name(k): v for k, v in server_params.items()}  # for parallel, test
             for n, sp in server_params.items():
-                sp.grad = aggregate[n] / args.clients
+                sp.grad = aggregate[n] / server_batch
             server_opt.step()
             server_opt.zero_grad()
 
