@@ -28,17 +28,17 @@ def evaluate_mini_batch(llm, instructions,
         prompts = [generate_prompt_eval(instruction) for instruction in instructions]
         outputs = llm.generate(prompts, sampling_params)
     responses = [o.outputs[0].text.strip() for o in outputs]
-    paired_data = []
-    for instr, resp in zip(instructions, responses):
-        paired_data.append({
-            "instruction": instr,
-            "response": resp
-        })
+    # paired_data = []
+    # for instr, resp in zip(instructions, responses):
+    #     paired_data.append({
+    #         "instruction": instr,
+    #         "response": resp
+    #     })
 
     return responses
 
 def evaluate(llm, args, rnd):
-    save_path_log = ""
+    save_path_log = f'./training_log_set/{args.algorithm}_H{args.local_iter_per_round}_rounds{args.num_comm_rounds}_{args.rank_type}/{args.dataset}'
     os.makedirs(save_path_log, exist_ok=True)
     log_eval = f'{save_path_log}/eval.txt'
 
@@ -69,27 +69,28 @@ if __name__ == '__main__':
     args = parse()
     base_seed = 42
     torch.manual_seed(base_seed)
-    pbar = tqdm(range(14, 15), desc=f'{args.algorithm}')
-    
+    pbar = tqdm(range(args.num_comm_rounds//args.eval_freq))
     
     for rnd in pbar:
         # Load full-precision base model (no quantization here!)
         base_model = AutoModelForCausalLM.from_pretrained(
-            "meta-llama/Llama-3.2-3B-Instruct",
+            args.base_model,
             torch_dtype=torch.bfloat16,
-            device_map="cpu"
+            device_map="cpu",
+            cache_dir="...",
         )
-        base_model_dir = ""
+        base_model_dir = "..."
         tokenizer = AutoTokenizer.from_pretrained(
-            "meta-llama/Llama-3.2-3B-Instruct",
-            token=True
+            args.base_model,
+            token=True,
+            cache_dir="..."
         )
         tokenizer.pad_token_id = 0
         tokenizer.padding_side = "left"
     
     
-        lora_path = ""
-        iteration_model_path = os.path.join(base_model_dir, f"slora_{args.rank_type}", f"iteration_{rnd}")
+        lora_path = f"./model_parameters_set/{args.algorithm}_H{args.local_iter_per_round}_rounds{args.num_comm_rounds}_type{args.rank_type}/{rnd}"
+        iteration_model_path = os.path.join(base_model_dir, f"{args.algorithm}_H{args.local_iter_per_round}_rounds{args.num_comm_rounds}_type{args.rank_type}", f"iteration_{rnd}")
         tokenizer.save_pretrained(iteration_model_path)
 
         peft_model = PeftModel.from_pretrained(base_model, lora_path)
