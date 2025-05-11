@@ -3,7 +3,7 @@ import argparse
 def parse():
     parser = argparse.ArgumentParser()
     parser.add_argument('--gpu',    default="0,1",     type=str)
-    parser.add_argument('--base-model',    default='meta-llama/Llama-3.2-3B-Instruct',  type=str) # 'meta-llama/Llama-2-7b-hf'; 'meta-llama/Llama-3.2-1B' meta-llama/Llama-3.2-3B-Instruct microsoft/Phi-3.5-mini-instruct google/gemma-2-2b-it
+    parser.add_argument('--base-model',    default='meta-llama/Llama-3.2-3B-Instruct',  type=str)
     parser.add_argument('--dataset',    default='commensense',  type=str)
     parser.add_argument('--rank_type',    default='normal',  type=str)
     parser.add_argument('--clients',    default=50,       type=int)
