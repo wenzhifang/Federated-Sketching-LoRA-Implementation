@@ -39,17 +39,16 @@ FSLoRA/
 │   requirements.txt
 ├─── src/
 │   │   arg.py
-│   │   LoRA_sketching_llama_het.py
+│   │   LoRA_Sketching.py
 │   │   evaluation_vllm.py
 │   │   models.py
 │   │   utils_data.py
-│   │   utils_train.py
 │   │   main.py
 │   │   run_main.sh
 ```
-- **`src/`**: Contains the primary codebase for LLaMA-3.2-3B on the Commensense Reasoning benchmark.
-  - `LoRA_sketching_llama_het.py`: Our FSLoRA framework for LLaMA-3.2-3B.
-  - `models.py`: Includes building model.
+- **`src/`**: Contains the primary codebase.
+  - `LoRA_Sketching.py`: Our FSLoRA framework.
+  - `models.py`: Building model and adapters.
   - `evaluation_vllm.py`: For fast evaluation.
   - `run_main.sh`: Execute FSLoRA algorithm and evaluate the checkpoints
 
