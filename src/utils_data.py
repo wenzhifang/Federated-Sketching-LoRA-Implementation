@@ -10,13 +10,12 @@ from arg import parse
 args = parse()
 base_model = args.base_model
 
-# Load model directly
 from transformers import AutoTokenizer, AutoModelForCausalLM
 
-from huggingface_hub import login
-login()
+# from huggingface_hub import login
+# login("")
 
-tokenizer = AutoTokenizer.from_pretrained(base_model, token = True)
+tokenizer = AutoTokenizer.from_pretrained(base_model, token = True, cache_dir="..." )
 tokenizer.pad_token_id = 0
 tokenizer.padding_side = "left"
 def tokenize(prompt, cutoff_len):
@@ -127,6 +126,39 @@ def collate_fn_left(batch):
         "labels": labels_padded
     }
 
+def build_datasets_1(args, base_seed):
+    file_path = f'./dataset/{args.dataset}/train.json'
+    if not os.path.exists(file_path):
+        raise FileNotFoundError(f"can not find dataset file : {file_path}")
+    dataset = load_dataset("json", data_files=file_path)["train"]
+    trainset = dataset.map(generate_and_tokenize_prompt)
+
+    # Convert dataset to a list for shuffling
+    trainset_list = list(trainset)
+    random.seed(base_seed)
+    # Perform deterministic shuffling (seed already set in main.py)
+    random.shuffle(trainset_list)  # Use Python's random.shuffle
+
+    # Convert the shuffled list back to a dataset
+    shuffled_trainset = trainset.select(range(len(trainset_list)))
+
+    # Shard the dataset into client-specific subsets
+    clients = [
+        DataLoader(
+            shuffled_trainset.shard(num_shards=args.clients, index=i),
+            batch_size=args.client_batch,
+            shuffle=False,  # No need to shuffle again here
+            num_workers=4,
+            collate_fn=collate_fn_left,
+            pin_memory=True,
+        )
+        for i in range(args.clients)
+    ]
+    return clients
+
+
+## below for evaluation
+
 def extract_answer(args, sentence: str) -> float:
     dataset = args.dataset
     if dataset == 'boolq':
@@ -196,7 +228,7 @@ def build_datasets_eval(args):
 
 
 
-def build_datasets(args, alpha=0.5):
+def build_datasets(args, alpha=0.3):
     num_clients = args.clients
     dataset_list = ["ARC-Challenge", "ARC-Easy", "boolq", "hellaswag", "openbookqa", "piqa", "social_i_qa", "winogrande"]
     base_seed = 42
@@ -255,29 +287,6 @@ def build_datasets(args, alpha=0.5):
             client_task_counts[client_id][largest_dataset_name] = size_diff
             task_totals[largest_dataset_name] += size_diff
             largest_idx += size_diff
-    '''
-    print("Final data distribution:", [len(clients[x]) for x in range(num_clients)])
-    
-    # Print distribution table
-    sorted_datasets = sorted(list(datasets.keys()) + [largest_dataset_name])
-    header = "Client | " + " | ".join(sorted_datasets) + " | Total"
-    separator = "-" * len(header)
-    print(separator)
-    print(header)
-    print(separator)
-    
-    client_totals = []
-    for client_id in range(num_clients):
-        client_total = sum(client_task_counts[client_id].values())
-        client_totals.append(client_total)
-        row_values = [str(client_task_counts[client_id][ds]) for ds in sorted_datasets]
-        print(f"{client_id:6d} | {' | '.join(row_values):s} | {client_total}")
-    
-    print(separator)
-    task_total_values = [str(task_totals[ds]) for ds in sorted_datasets]
-    print(f"Total  | {' | '.join(task_total_values)} | {sum(client_totals)}")
-    print(separator)
-    '''
     
     # Convert to Dataset objects and apply tokenization
     client_datasets = {i: Dataset.from_list(data) for i, data in clients.items()}
