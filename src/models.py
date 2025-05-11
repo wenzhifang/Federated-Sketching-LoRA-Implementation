@@ -47,7 +47,7 @@ def build_model_FLoRA(base_model):
             torch_dtype=torch.float16,
             use_auth_token = True, 
             attn_implementation="flash_attention_2",
-            cache_dir="/scratch/gautschi/fang375"
+            cache_dir="..."
         )
     return model
 
