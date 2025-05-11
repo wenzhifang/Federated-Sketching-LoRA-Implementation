@@ -2,7 +2,7 @@ from copy import deepcopy
 from arg import parse
 import models
 import random
-from LoRA_svd_llama_het import fl_svd_lora_train_het
+from LoRA_SVD import fl_svd_lora_train_het
 from utils_data import *
 from transformers import AutoTokenizer, AutoModelForCausalLM
 from huggingface_hub import login
