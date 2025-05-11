@@ -8,6 +8,22 @@ import numpy as np
 
 args = parse()
 
+def optimize_model_memory(model):
+    model.train()
+    model.config.use_cache = False
+
+    # First ensure inputs will require gradients
+    if hasattr(model, "enable_input_require_grads"):
+        model.enable_input_require_grads()
+    else:
+        def make_inputs_require_grad(module, input, output):
+            output.requires_grad_(True)
+        model.get_input_embeddings().register_forward_hook(make_inputs_require_grad)
+
+    # Then enable gradient checkpointing
+    model.gradient_checkpointing_enable()
+    return model
+
 def normalize_name(name):
     while name.startswith("module."):
         name = name[len("module."):]  # Remove module. until no longer present
@@ -25,7 +41,9 @@ def fl_slora_train_llama_het(server_model, client_dataloaders, server_opt, serve
     print(f"Using device: {accelerator.device}")
     print(f"Number of processes: {accelerator.state.num_processes}")
     print(f"Process index: {accelerator.state.local_process_index}")
-
+    
+    server_model.to(accelerator.device) #required if don't call quantized model via bitsandbytes
+    
     server_params = {n:p for n, p in server_model.named_parameters() if p.requires_grad == True}
     if server_opt == 'sgd':
         server_opt = torch.optim.SGD(server_params.values(), lr=server_lr)
@@ -35,29 +53,29 @@ def fl_slora_train_llama_het(server_model, client_dataloaders, server_opt, serve
         raise ValueError()
     server_opt.zero_grad()
     
-    shuffled_data = {}
-    for ep in range(args.num_epochs):
-        print(f"\n=== Epoch {ep+1}/{args.num_epochs} ===")
-        num_comm_rounds = args.num_comm_rounds
-        pbar = tqdm(range(num_comm_rounds), desc=f"Epoch {ep+1}")
-        
+    for ep in range(args.num_comm_rounds//eval_freq):
+        print(f"\n=== Saving round {ep+1}/{args.num_comm_rounds//eval_freq} ===")
+        pbar = tqdm(range(eval_freq), desc=f"Epoch {ep+1}")
         for rnd in pbar:
             aggregate = None
-            client_ids = torch.randperm(len(client_dataloaders))[:server_batch]
-            for i,client_id in enumerate(client_ids):
+
+            client_ids = torch.randperm(args.clients)[:args.server_batch]
+            for i, client_id in enumerate(client_ids):
                 
                 client_model = deepcopy(server_model)
                 client_model.config.use_cache = False  # Disable caching for training
+                client_model = optimize_model_memory(client_model) # set train mode and set requires_grad=True
                 # Local Training
-                client_opt = torch.optim.SGD(client_model.parameters(), lr=client_lr, momentum=0.9)
+                # client_opt = torch.optim.SGD(client_model.parameters(), lr=client_lr, momentum=0.9)
+                client_opt = torch.optim.AdamW(client_model.parameters(), lr=client_lr)
                 client_opt.zero_grad()
                 client_loader = client_dataloaders[client_id]
-                client_model, client_opt = accelerator.prepare(client_model, client_opt)
+                client_model, client_opt, client_loader = accelerator.prepare(client_model, client_opt, client_loader)
 
                 sketching_mat = {}
                 mask_set = {}
                 m = m_list[client_id] # the effective rank of client i
-                print('ratio:', r/m)
+                #print('ratio:', r/m)
                 for n,p in client_model.named_parameters():
                     S = torch.ones_like(p.data) # for the final linear layer
                     mask = torch.ones_like(p.data)
@@ -85,7 +103,6 @@ def fl_slora_train_llama_het(server_model, client_dataloaders, server_opt, serve
                     labels = batch["labels"]
                     outputs = client_model(input_ids=input_ids, attention_mask=attention_mask, labels=labels)
                     loss = outputs.loss
-                    #loss.backward()
                     accelerator.backward(loss)
                     
                     for n,p in client_model.named_parameters():
@@ -95,7 +112,6 @@ def fl_slora_train_llama_het(server_model, client_dataloaders, server_opt, serve
                     client_opt.step()
                     client_opt.zero_grad()
                         
-                
                 for n,p in client_model.named_parameters():
                     if 'lora_B' == n:
                         epsilon = 1e-8  # A small constant to prevent division by zero
@@ -104,10 +120,8 @@ def fl_slora_train_llama_het(server_model, client_dataloaders, server_opt, serve
                 
                 neg_client_delta = {normalize_name(n): (server_params[normalize_name(n)].data - cp.data)*mask_set[normalize_name(n)] for n,cp 
                                     in client_model.named_parameters() if cp.requires_grad} # for parallel, test
-
-                
+              
                 for n in neg_client_delta:
-                    #neg_client_delta[n] = accelerator.gather(neg_client_delta[n])
                     neg_client_delta[n] = accelerator.reduce(neg_client_delta[n], reduction="mean")
                 # Aggregation
                 if aggregate is None:
@@ -115,20 +129,19 @@ def fl_slora_train_llama_het(server_model, client_dataloaders, server_opt, serve
                 else:
                     for n, delta in neg_client_delta.items():
                         aggregate[n] += delta
+                del client_model
                 torch.cuda.empty_cache()
                 accelerator.free_memory()  # Releases memory allocated by Accelerate *** IMPORTANT, Memory explosion
             
             # Server model update
-            server_params = {normalize_name(k): v for k, v in server_params.items()}  # for parallel, test
+            server_params = {normalize_name(k): v for k, v in server_params.items()}
             for n, sp in server_params.items():
-                sp.grad = aggregate[n] / server_batch
+                sp.grad = aggregate[n]/args.server_batch
             server_opt.step()
             server_opt.zero_grad()
-
-            # Synchronize processes
             accelerator.wait_for_everyone()
 
         if accelerator.is_main_process: 
-            save_path = "..."
+            save_path = f"./model_parameters_set/slora{args.lora_r}_H{args.local_iter_per_round}_rounds{args.num_comm_rounds}_type{args.rank_type}/{ep}"
             os.makedirs(save_path, exist_ok=True)
             server_model.save_pretrained(save_path)
