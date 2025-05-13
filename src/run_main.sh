@@ -3,7 +3,7 @@
 export TOKENIZERS_PARALLELISM=true
 
 rank_type="heavy_tail_low"
-num_comm_rounds=600
+num_comm_rounds=500
 local_iter_per_round=20
 eval_freq=20
 
