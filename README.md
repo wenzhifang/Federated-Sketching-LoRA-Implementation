@@ -6,7 +6,7 @@
 ---
 ## 🔥 Our Framework
 
-TL, DR: In this repo, we provide the implementation of **Federated Sketching LoRA** (FSLoRA), a novel methodology for collaborative LLM fine-tuning across resource-heterogeneous devices
+TL, DR: In this repo, we provide the implementation of **Federated Sketching LoRA** (FSLoRA), a sketching-based methodology for collaborative LLM fine-tuning across resource-heterogeneous devices
 
 <div align="center">
     <img src="figures/Overview.png" alt="overview" style="width:60%;"/>
