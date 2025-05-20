@@ -74,5 +74,5 @@ If you find our work helpful, please consider citing our paper:
 >  author={Fang, Wenzhi and Han, Dong-Jun and Yuan, Liangqi and Hosseinalipour, Seyyedali and Brinton, Christopher G},
 >  journal={arXiv preprint arXiv:2501.19389},
 >  year={2025}
-}
+> }
 > ```
