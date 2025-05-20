@@ -6,7 +6,7 @@
 ---
 ## 🔥 Our Framework
 
-TL, DR: In this repo, we provide the implementation of **Federated Sketching LoRA** (FSLoRA), a sketching-based methodology for collaborative LLM fine-tuning across resource-heterogeneous devices
+TL, DR: In this repo, we provide the implementation of **Federated Sketching LoRA** (FSLoRA), a sketching-based methodology for collaborative LLM fine-tuning across resource-heterogeneous devices.
 
 <div align="center">
     <img src="figures/Overview.png" alt="overview" style="width:60%;"/>
@@ -62,3 +62,17 @@ Run our framework with the following command:
 ./run_main.sh
 ```
 This code runs with 4 NVIDIA A100 GPUs in parallel, using the Accelerate library for efficient multi-GPU support.
+
+
+## :star: Citation
+
+If you find our work helpful, please consider citing our paper:
+
+> ```
+>@article{fang2025federated,
+>  title={Federated Sketching LoRA: On-Device Collaborative Fine-Tuning of Large Language Models},
+>  author={Fang, Wenzhi and Han, Dong-Jun and Yuan, Liangqi and Hosseinalipour, Seyyedali and Brinton, Christopher G},
+>  journal={arXiv preprint arXiv:2501.19389},
+>  year={2025}
+}
+> ```
