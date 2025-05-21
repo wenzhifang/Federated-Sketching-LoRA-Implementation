@@ -71,8 +71,13 @@ def fl_slora_train_llama_het(server_model, client_dataloaders, server_opt, serve
                 client_opt.zero_grad()
                 client_loader = client_dataloaders[client_id]
                 client_model, client_opt, client_loader = accelerator.prepare(client_model, client_opt, client_loader)
-                # A computation and memory-efficient implementation requires changes over the LoRA modules (i.e., PEFT package)
-                # For ease of reproducibility, we provided a mathematically equivalent implementation based on the existing LoRA modules through some algebra operations
+
+                # We provided a mathematically equivalent implementation based on the existing PEFT package through some algebra operations, which is enough to validate the performance of FSLoRA
+                # Note that a more computation- and memory-efficient implementation involves directly extracting local LoRA modules from the global LoRA via sketching, followed by tuning the 
+                #   smaller local modules. However, this approach requires explicitly incorporating the sketching ratio r/k_i into the local LoRA matrices B_i and A_i, which entails modifying 
+                #   the PEFT package to accept r/k_i as an additional input.
+                # We adopt the algebraic transformation method here for simplicity and to facilitate reproducibility.
+            
                 sketching_mat = {}
                 mask_set = {}
                 m = m_list[client_id] # the effective rank of client i
