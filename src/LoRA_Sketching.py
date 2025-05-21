@@ -71,7 +71,8 @@ def fl_slora_train_llama_het(server_model, client_dataloaders, server_opt, serve
                 client_opt.zero_grad()
                 client_loader = client_dataloaders[client_id]
                 client_model, client_opt, client_loader = accelerator.prepare(client_model, client_opt, client_loader)
-
+                # A computation and memory-efficient implementation requires changes over the LoRA modules (i.e., PEFT package)
+                # For ease of reproducibility, we provided a mathematically equivalent implementation based on the existing LoRA modules through some algebra operations
                 sketching_mat = {}
                 mask_set = {}
                 m = m_list[client_id] # the effective rank of client i
@@ -86,7 +87,7 @@ def fl_slora_train_llama_het(server_model, client_dataloaders, server_opt, serve
                         mask = torch.zeros_like(p.data)
                         mask[:, rand_perm] = 1
                         S[:, rand_perm] = r / m
-                        p.data *= S ## (BS) * A,  p.data = BS
+                        p.data *= S ## (BS) * A,  p.data = BS 
                     elif 'lora_A' == n:
                         S = torch.zeros_like(p.data)
                         mask = torch.zeros_like(p.data)
